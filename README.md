@@ -28,12 +28,14 @@
 
 ### B. 书签 / 控制台
 
-[`bookmarklet/bookmarklets.txt`](bookmarklet/bookmarklets.txt) 里两行成品（`javascript:` 开头），整行做成书签，或直接粘进 F12 控制台：
+**最快**：用浏览器打开 [`bookmarklet/install.html`](bookmarklet/install.html) → 把绿色按钮**拖到书签栏**（`Ctrl+Shift+B` 显示书签栏）。
+
+手搓：从 [`bookmarklet/bookmarklets.txt`](bookmarklet/bookmarklets.txt) 复制整行（`javascript:` 开头）→ 书签管理器新建书签 → URL 粘贴。
 
 - **透视 + 自动点选**：控制台打印一次答案，然后自动点对 10 题（自己点页面上的「开始爬」）。
 - **秒过**：弹框问名字 → 直接提交 → 自动刷新到结果页。
 
-可读版：[`a_look.js`](bookmarklet/a_look.js)、[`b_instant.js`](bookmarklet/b_instant.js)。
+书签只在**当前页面**里执行：先打开答题页，再点书签。懒得做书签就 F12 → Console 粘 [`a_look.js`](bookmarklet/a_look.js) / [`b_instant.js`](bookmarklet/b_instant.js)（未编码的原始代码）。
 
 ### C. 命令行
 
@@ -50,12 +52,17 @@ python cloudz_tree_cheat.py --url "<分享链接>" submit --name <你的名字> 
 # 其他
 python cloudz_tree_cheat.py --url "<分享链接>" board          # 成绩榜
 python cloudz_tree_cheat.py --url "<分享链接>" sheet --out 答案.md   # 现场导出（不要就删）
-python cloudz_tree_cheat.py selftest                          # 零污染自测：自建树→满分→校验→删树
-python cloudz_tree_cheat.py --host c.cloudz.fun --quiz <ID> rmquiz --user-key <KEY>   # 删自建树
+python cloudz_tree_cheat.py --host c.cloudz.fun --quiz <ID> rmquiz --user-key <KEY>   # 删树（要 creator 的 key）
 ```
 
 `--url` 会自动解析域名和 id；只给 id 时用 `--host` 指定站点（`cloudz.fun` / `c.cloudz.fun`），
 给错域名会自动重试并提示。**工具里不内置任何人的树**：不给 `--url` / `--quiz` 就会提示你补上。
+
+回归（可选，需要你给一张页面；会真的提交一次成绩，别拿别人的树跑）：
+
+```powershell
+pwsh -File tools/regress.ps1 -Url "<答题页链接>"
+```
 
 ---
 
@@ -106,7 +113,7 @@ python cloudz_tree_cheat.py --host c.cloudz.fun --quiz <ID> rmquiz --user-key <K
 | `POST /tree/api/quizzes/{id}/players` | 交卷 `{playerName, answers[], submissionId}` |
 | `GET  /tree/api/token` | 发 CSRF token（需先访问页面拿 cookie） |
 | `GET  /tree/api/quizzes/{id}/players` | 成绩榜 |
-| `POST /tree/api/quizzes` · `DELETE /tree/api/quizzes/{id}` | 建树 / 删树（自测用，删树要创作者 `User-Key`） |
+| `DELETE /tree/api/quizzes/{id}` | 删树（要创作者 `User-Key`） |
 
 ---
 

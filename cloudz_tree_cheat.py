@@ -13,12 +13,10 @@ cloudz_tree_cheat.py — cloudz.fun「圣诞树」好友问答 · 答案透视 /
   submit     用满分答案直接提交（默认不落数据，加 --yes 才真的 POST）
   board      看树上的成绩榜
   dump       把 round 原始 JSON 落盘
-  selftest   自建一张测试树 → 透视 → 满分提交 → 校验 → 删除（零污染闭环）
 
 示例：
   python cloudz_tree_cheat.py --url <分享链接> key
   python cloudz_tree_cheat.py --url <分享链接> submit --name <名字> --yes
-  python cloudz_tree_cheat.py selftest
 """
 
 from __future__ import annotations
@@ -240,15 +238,6 @@ class Cloudz:
         params = {"page": page} if page > 1 else None
         return self._get(f"/quizzes/{q}/players", params)
 
-    def questions(self, gender: str = "female") -> dict:
-        return self._get("/questions", {"gender": gender, "locale": self.locale, "country": "CN"})
-
-    def create_quiz(self, name: str, gender: str, mood: str, answers: List[dict]) -> dict:
-        body = {"userName": name, "userGender": gender, "mood": mood,
-                "answers": answers, "country": "CN", "locale": self.locale,
-                "submissionId": rand_id(24)}
-        return self._post("/quizzes", body)
-
     def delete_quiz(self, quiz: str, user_key: str) -> dict:
         if quiz and quiz != self.quiz:
             self.resolve_quiz(quiz)
@@ -366,81 +355,10 @@ def cmd_dump(c: Cloudz, a) -> int:
     return 0
 
 
-def cmd_mkquiz(c: Cloudz, a) -> int:
-    """建一张一次性测试树（给浏览器回归用），随机 10 题随机答案。"""
-    bank = c.questions(a.gender)
-    if not bank.get("success"):
-        print("题库拉取失败：", bank.get("message"), file=sys.stderr)
-        return 2
-    qs = random.sample(bank["questions"], 10)
-    answers = [{"quesID": q["id"], "optionIndex": random.randrange(len(q["options"]))} for q in qs]
-    created = c.create_quiz(a.name, a.gender, a.mood, answers)
-    if not created.get("success"):
-        print("建树失败：", created, file=sys.stderr)
-        return 2
-    qid = (created.get("quiz") or {}).get("id") or created.get("id")
-    print(json.dumps({"quiz": qid, "userKey": created.get("userKey"), "url": f"{c.site}/tree/{c.locale}/visit?id={qid}"},
-                     ensure_ascii=False))
-    return 0
-
-
 def cmd_rmquiz(c: Cloudz, a) -> int:
     r = c.delete_quiz(c.quiz, a.user_key)
     print("已删除" if r.get("success") else f"删除失败 {r.get('message')}")
     return 0 if r.get("success") else 2
-
-
-def cmd_selftest(c: Cloudz, a) -> int:
-    """零污染闭环：自建树 → 透视 → 满分提交 → 校验 → 删树。"""
-    print("① 拉题库 …")
-    bank = c.questions("female")
-    if not bank.get("success") or not bank.get("questions"):
-        print("题库拉取失败：", bank.get("message"), file=sys.stderr)
-        return 2
-    qs = random.sample(bank["questions"], 10)
-    creator_answers = [{"quesID": q["id"], "optionIndex": random.randrange(len(q["options"]))} for q in qs]
-    print(f"   题库 {len(bank['questions'])} 题，随机挑 10 题，随机答案 = {[x['optionIndex'] for x in creator_answers]}")
-
-    print("② 建一张自测树 …")
-    created = c.create_quiz("自测树", "female", "sleep", creator_answers)
-    if not created.get("success"):
-        print("建树失败：", created.get("message"), created, file=sys.stderr)
-        return 2
-    quiz_id = (created.get("quiz") or {}).get("id") or created.get("id")
-    user_key = created.get("userKey") or created.get("user_key")
-    print(f"   quiz={quiz_id} userKey={str(user_key)[:8]}…")
-
-    try:
-        print("③ 走作弊路径：取 round → 读 correct …")
-        s = c.solved(quiz_id)
-        read = s["answers"]
-        print(f"   读到的满分 answers = {read}")
-
-        expect = [x["optionIndex"] for x in creator_answers]
-        same = read == expect
-        print(f"   与建树时写入的答案一致：{'✔ 是' if same else '✘ 不一致'}")
-        if not same:
-            print(f"   写入={expect} 读到={read}", file=sys.stderr)
-
-        print("④ 用满分答卷提交 …")
-        r = c.submit("满分测试", read, quiz_id)
-        p = r.get("player") or {}
-        ok_submit = bool(r.get("success")) and p.get("score") == 10 and p.get("perfect") and p.get("ending") == "top"
-        print(f"   score={p.get('score')} perfect={p.get('perfect')} ending={p.get('ending')} top={p.get('top')}")
-
-        print("⑤ 成绩榜核对 …")
-        b = c.board(quiz_id)
-        names = [(x.get("name"), x.get("score")) for x in b.get("players", [])]
-        print(f"   榜上：{names}")
-
-        verdict = same and ok_submit and any(n == "满分测试" and sc == 10 for n, sc in names)
-        print("\n" + ("✅ 自测通过：透视→满分→上榜 全链成立" if verdict else "❌ 自测未通过，看上面各步"))
-        return 0 if verdict else 3
-    finally:
-        if user_key:
-            print("⑥ 清理：删掉自测树 …")
-            d = c.delete_quiz(quiz_id, user_key)
-            print("   ", "已删除" if d.get("success") else f"删除失败 {d.get('message')}")
 
 
 # ────────────────────────────────────────────── main ──────────────────────────────────────────────
@@ -450,8 +368,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="cloudz.fun 圣诞树问答 · 答案透视 / 满分提交",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="只读看一眼：  python cloudz_tree_cheat.py --url <分享链接> key\n"
-               "真提交一次：  python cloudz_tree_cheat.py --url <分享链接> submit --name <名字> --yes\n"
-               "自测闭环：    python cloudz_tree_cheat.py selftest")
+               "真提交一次：  python cloudz_tree_cheat.py --url <分享链接> submit --name <名字> --yes")
     p.add_argument("--url", help="直接给分享链接（自动解析域名 + id）：https://<host>/tree/f/<id>")
     p.add_argument("--host", default=DEFAULT_HOST, help=f"站点域名（默认 {DEFAULT_HOST}；c.cloudz.fun 是另一套数据）")
     p.add_argument("--quiz", default=DEFAULT_QUIZ, help="树 id（不写就用 --url；两个都不给会报错）")
@@ -484,14 +401,7 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--out")
     d.set_defaults(func=cmd_dump)
 
-    st = sub.add_parser("selftest", help="自建树闭环自测（跑完自动删）")
-    st.set_defaults(func=cmd_selftest)
 
-    mk = sub.add_parser("mkquiz", help="建一张一次性测试树（回到 JSON）")
-    mk.add_argument("--name", default="测试树")
-    mk.add_argument("--gender", default="female", choices=["female", "male"])
-    mk.add_argument("--mood", default="sleep")
-    mk.set_defaults(func=cmd_mkquiz)
 
     rm = sub.add_parser("rmquiz", help="删树（要 userKey）")
     rm.add_argument("--user-key", required=True)
@@ -511,8 +421,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         m = re.search(r"/tree/([a-z]{2,3})/(?:visit|f)/", a.url)
         if m and m.group(1) not in ("api",):
             locale = m.group(1)
-    # 不内置任何人的树：selftest/mkquiz 自己建，其它命令必须显式给 --url 或 --quiz
-    if not quiz and a.cmd not in ("selftest", "mkquiz"):
+    # 不内置任何人的树：必须显式给 --url 或 --quiz
+    if not quiz:
         print("需要指定树：--url <分享链接>  或  --quiz <树ID>（本工具不内置任何人的树）", file=sys.stderr)
         return 2
     c = Cloudz(quiz=quiz, locale=locale, host=host, api=a.api,
