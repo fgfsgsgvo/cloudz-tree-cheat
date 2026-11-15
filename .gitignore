@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# 抓下来的现场证据 / 导出的答案表
+_recon/
+答案*.md
+
+# 杂项
+*.log
+.DS_Store
