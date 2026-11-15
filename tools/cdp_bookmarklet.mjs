@@ -49,6 +49,7 @@ ws.addEventListener('message', ev => {
   const m = JSON.parse(ev.data);
   if (m.id && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.j(new Error(JSON.stringify(m.error))) : p.r(m.result); }
   else if (m.method === 'Runtime.exceptionThrown') errs.push(m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text);
+  else if (m.method === 'Log.entryAdded') errs.push('[log] ' + m.params.entry.level + ': ' + m.params.entry.text);
 });
 const send = (method, params = {}, sessionId) => {
   const mid = ++id, p = { id: mid, method, params }; if (sessionId) p.sessionId = sessionId;
@@ -60,6 +61,7 @@ const { targetId } = await send('Target.createTarget', { url: 'about:blank' });
 const { sessionId } = await send('Target.attachToTarget', { targetId, flatten: true });
 await send('Page.enable', {}, sessionId);
 await send('Runtime.enable', {}, sessionId);
+await send('Log.enable', {}, sessionId);
 const ev = async expr => {
   const r = await send('Runtime.evaluate', { expression: expr, returnByValue: true, awaitPromise: true }, sessionId);
   if (r.exceptionDetails) return { __err: r.exceptionDetails.exception?.description || r.exceptionDetails.text };
@@ -78,7 +80,20 @@ try {
   await sleep(3500);
 
   // ── A: a_look.js ──────────────────────────────────────────────
-  out.stages.lookEval = await ev(look.startsWith('/*') ? look : look);
+  // --mode click：注入 <a href="javascript:…"> 再 .click()，等价于真点书签（受页面 CSP 约束）
+  // 注意 javascript: URL 必须把换行压平、% → %25、# → %23，否则代码会被截断/改写
+  const toHref = (code) => 'javascript:' + String(code)
+    .replace(/\r/g, '').split('\n').map((s) => s.trim()).filter(Boolean).join(' ')
+    .replace(/%/g, '%25').replace(/#/g, '%23');
+  const runAs = async (code) => {
+    if (String(args.mode || 'eval') === 'click') {
+      const expr = '(()=>{const a=document.createElement("a");a.href=' + JSON.stringify(toHref(code)) +
+        ';document.body.appendChild(a);a.click();a.remove();return true})()';
+      return ev(expr);
+    }
+    return ev(code);
+  };
+  out.stages.lookEval = await runAs(look);
   out.stages.hasState = await ev(`!!window.__CZ__`);
   out.stages.consoleAnswers = await ev(`JSON.stringify((window.__CZ__||{}).ans||null)`);
   out.stages.inviteInput = await ev(`!!document.querySelector('.xm-input')`);
@@ -95,7 +110,7 @@ try {
   // headless 里 prompt() 会把页面挂住 —— 先替成常量（真人点书签会正常弹框）
   await ev(`window.prompt = () => '书签秒过';1`);
   out.stages.instantEval = await ev('1');
-  await ev(instant);
+  await runAs(instant);
   const pB = await waitPlayed(60000);
   out.stages.instant = pB ? { score: pB.score, ending: pB.ending, perfect: pB.perfect, top: pB.top } : null;
 
@@ -115,5 +130,6 @@ try {
   try { await rm(profile, { recursive: true, force: true }); } catch {}
 }
 process.exit(out.pass ? 0 : 1);
+
 
 
