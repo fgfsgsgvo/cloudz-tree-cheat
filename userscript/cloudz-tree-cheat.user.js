@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Cloudz 圣诞树 · 答案透视 / 自动爬树 / 秒过 10-10
 // @namespace    dsh.local.cloudz
-// @version      1.2.0
+// @version      1.3.0
 // @description  读取 /round 接口里的 correct 标记自动点对；先填名字再点「开始答题」（不抢跑）、强制低动效加速、可跳过动画直接提交满分；面板不显示答案表
 // @match        https://cloudz.fun/tree/*
 // @match        https://c.cloudz.fun/tree/*
@@ -15,7 +15,7 @@
 /*
  * 工作原理
  * ---------
- * 1) 朋友的答题页在开赛前 GET /tree/api/quizzes/<id>/round?locale=cn，
+ * 1) 朋友的答题页在开赛前 GET /tree/api/quizzes/<id>/round?locale=<页面语言>，
  *    响应里每个选项就带 "correct": true/false —— 答案在客户端，不需要猜。
  * 2) 本脚本在 document-start 就把 window.fetch 包一层，把那份 round 响应抄下来，
  *    于是 10 题的正确答案在题目出现在屏幕上之前就已经在手里。
@@ -85,6 +85,14 @@
     const p = location.pathname.match(/\/tree\/f\/([A-Za-z0-9]+)/);
     return p ? p[1] : null;
   }
+  // 页面自己用什么语言，round 就必须用什么语言去取：
+  // /tree/en 的页面拿 ?locale=cn 回来是中文选项，文字匹配会全部落空（这就是"标错答案"的真因）
+  function pageLocale() {
+    const c = window.XM_CONFIG;
+    if (c && c.locale) return String(c.locale);
+    const m = location.pathname.match(/\/tree\/([a-z]{2,3})\//);
+    return m ? m[1] : 'cn';
+  }
   function log(msg) {
     S.log.unshift(new Date().toLocaleTimeString() + '  ' + msg);
     S.log.length = Math.min(S.log.length, 6);
@@ -133,12 +141,14 @@
       positions.push(pos);
     }
     const sameQuiz = S.quizId === quizId;
-    // 关键：同一张树的 round 被二次抓取（页面一次、兜底又一次）时，绝对不能把计数器归零，
-    // 否则第 2 次 ingest 之后每一题都会错位。
-    if (!sameQuiz || S.optCount === 0) {
-      S.optCount = 0;
-      S.seen = new WeakSet();
+    // 已开局就别再换题库：二次抓回来的 round 是**另一次洗牌**，卡片位置和页面上的对不上，
+    // 只是把 S.positions 弄脏（这就是线上"标的那张不是答案"的根因之一）。答案文本不会变，够用。
+    if (sameQuiz && S.optCount > 0) {
+      log('已开局，忽略二次取到的 round（题库 index 未变）');
+      return;
     }
+    S.optCount = 0;
+    S.seen = new WeakSet();
     S.quizId = quizId;
     S.questions = qs;
     S.answers = answers;
@@ -183,11 +193,6 @@
     (document.head || document.documentElement).appendChild(st);
   }
 
-  function correctPosFor(k) {
-    if (!S.positions || k < 1 || k > S.positions.length) return -1;
-    return S.positions[k - 1];
-  }
-
   // 题干文本匹配：比「第几个 .xm-opts」更抗错位（页面重绘/二次抓 round 都不会串题）
   // 返回 0 = 这道题在手里的 round 里根本没有 → 说明换树了 / 缓存是别人的题库
   function normText(s) { return String(s || '').replace(/\s+/g, ''); }
@@ -207,31 +212,33 @@
   }
 
   // 选项文本匹配：每次请求 round 时「给哪两张卡、谁在前」都会重洗，
-  // 所以位置只是快路，文本才是保险。
+  // 而且**必须用页面自己的语言**（/en 页面拿 cn 的 round 回来是中文，文本永远对不上）。
   function normT(s) { return String(s || '').replace(/\s+/g, ''); }
   function pickButton(opts, k) {
     const q = S.questions && S.questions[k - 1];
     if (!q) return null;
     const pos = S.positions ? S.positions[k - 1] : -1;
     const nmv = (window.XM_CONFIG && window.XM_CONFIG.quiz && window.XM_CONFIG.quiz.name) || '';
-    const wantRaw = pos >= 0 && q.options[pos] ? String(q.options[pos].text || '').replace(/userName/g, nmv) : '';
-    const want = normT(wantRaw);
-    const byPos = pos >= 0 ? opts.children[pos] : null;
-    if (want && byPos && normT(byPos.textContent).indexOf(want) !== -1) return byPos;
+    const want = normT(pos >= 0 && q.options[pos] ? String(q.options[pos].text || '').replace(/userName/g, nmv) : '');
+    // 先全量按文字找（位置只作兜底，绝不先信位置）
     if (want) {
       for (let i = 0; i < opts.children.length; i++) {
-        if (normT(opts.children[i].textContent).indexOf(want) !== -1) return opts.children[i];
+        if (normT(opts.children[i].textContent).indexOf(want) !== -1) {
+          return { btn: opts.children[i], pos: i, byText: true };
+        }
       }
     }
-    return byPos || null;
+    const byPos = pos >= 0 ? opts.children[pos] : null;
+    return byPos ? { btn: byPos, pos: pos, byText: false } : null;
   }
 
   function paint(opts, k) {
-    const pos = correctPosFor(k);
-    if (pos < 0) { log('第 ' + k + ' 题答案未知（round 没抓到）'); return; }
-    const btn = pickButton(opts, k);
-    if (!btn) { log('第 ' + k + ' 题选项对不上（' + opts.children.length + ' 张）'); return; }
-    if (S.set.mark) {
+    const pick = pickButton(opts, k);
+    if (!pick || !pick.btn) { log('第 ' + k + ' 题选项对不上（' + opts.children.length + ' 张）'); return; }
+    const btn = pick.btn;
+    if (!pick.byText) log('Q' + k + '：选项文字没对上，只能按位置点（可能不准）');
+    // 只有文字确认过才打「✔ 正确」——不打没把握的标
+    if (S.set.mark && pick.byText) {
       btn.classList.add('cz-hit');
       if (!btn.querySelector('.cz-badge')) {
         const b = document.createElement('span');
@@ -244,10 +251,11 @@
       setTimeout(function () {
         if (!btn.isConnected) return;
         btn.click();
-        log('Q' + k + ' → 已选第 ' + (pos + 1) + ' 张（题库 index=' + S.answers[k - 1] + '）');
+        log('Q' + k + ' → 点第 ' + (pick.pos + 1) + ' 张' + (pick.byText ? '（按文字）' : '（位置兜底）')
+          + ' · ' + String(btn.textContent || '').replace(/✔\s*正确/, '').trim().slice(0, 18));
       }, Math.max(0, S.set.delay | 0));
     } else {
-      log('Q' + k + ' → 答案在第 ' + (pos + 1) + ' 张（手动点）');
+      log('Q' + k + ' → 第 ' + (pick.pos + 1) + ' 张：' + String(btn.textContent || '').replace(/✔\s*正确/, '').trim().slice(0, 18));
     }
   }
 
@@ -327,7 +335,7 @@
 
   // ───────────────────────────── 4. 「秒过」：直接 POST 满分答卷 ─────────────────────────────
   async function fetchRound(quizId) {
-    const r = await realFetch(apiBase() + '/quizzes/' + quizId + '/round?locale=cn', {
+    const r = await realFetch(apiBase() + '/quizzes/' + quizId + '/round?locale=' + encodeURIComponent(pageLocale()), {
       headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
       credentials: 'same-origin'
     });
@@ -543,6 +551,8 @@
     boot();
   }
 })();
+
+
 
 
 

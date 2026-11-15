@@ -6,10 +6,11 @@
   const A = ((window.XM_CONFIG && window.XM_CONFIG.api) || (location.origin + '/tree/api')).replace(/\/+$/, '');
   const cfg = window.XM_CONFIG || {};
   const id = (cfg.quiz && cfg.quiz.id) || (location.search.match(/[?&]id=([A-Za-z0-9]+)/) || [])[1];
+  const LOC = (window.XM_CONFIG && window.XM_CONFIG.locale) || (location.pathname.match(/\/tree\/([a-z]{2,3})\//) || [])[1] || 'cn';
   const rid = n => [...crypto.getRandomValues(new Uint8Array(n))]
     .map(b => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'[b % 62]).join('');
 
-  const r = await (await fetch(`${A}/quizzes/${id}/round?locale=cn`, {
+  const r = await (await fetch(`${A}/quizzes/${id}/round?locale=${encodeURIComponent(LOC)}`, {
     headers: { Accept: 'application/json' }, credentials: 'same-origin'
   })).json();
   const answers = (r.questions || []).map(q => {
@@ -43,4 +44,6 @@
   console.log(`已提交 ${j.player.score}/10 · ${j.player.ending}` + (j.player.top ? ' · 顶枝' : ''));
   location.reload();
 })();
+
+
 

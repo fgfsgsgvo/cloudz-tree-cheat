@@ -93,6 +93,10 @@ pwsh -File tools/regress.ps1 -Url "<答题页链接>"
    而且每次请求「给哪两张、谁在前」都会重洗。所以：**点卡片按文字匹配，提交按 `index`**。
    题目顺序与正确答案的 `index` 是稳定的。
 
+   **必须用页面自己的语言取 round**（`XM_CONFIG.locale`，例如 `/tree/en` 就要 `?locale=en`）：
+   拿 cn 去取英文树，返回的是中文选项文本，按文字匹配必然全部落空 → 只能退回按位置点 → 标错答案。
+   另外**开局后不再接受第二次抓到的 round**（那是另一次洗牌，位置对不上，只是把内存弄脏）。
+
 4. **两个域名两套数据**。`cloudz.fun` 与 `c.cloudz.fun` 是同一份代码的独立部署，id 互不相通
    （拿主站 API 查 `c.` 的树 → `404 Quiz not found.`）。API 根一律读页面里的 `window.XM_CONFIG.api`。
 

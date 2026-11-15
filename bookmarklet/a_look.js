@@ -12,10 +12,13 @@
   const cfg = window.XM_CONFIG || {};
   const id = (cfg.quiz && cfg.quiz.id) || (location.search.match(/[?&]id=([A-Za-z0-9]+)/) || [])[1];
   const nm = (cfg.quiz && cfg.quiz.name) || '';
+  // 页面语言：/tree/en 必须用 locale=en 取 round，否则拿回来是中文文本，匹配必错
+  const LOC = (window.XM_CONFIG && window.XM_CONFIG.locale) || (location.pathname.match(/\/tree\/([a-z]{2,3})\//) || [])[1] || 'cn';
+
   const norm = s => String(s || '').replace(/\s+/g, '');
   const filled = s => String(s || '').replace(/userName/g, nm);
 
-  const r = await (await fetch(`${A}/quizzes/${id}/round?locale=cn`, {
+  const r = await (await fetch(`${A}/quizzes/${id}/round?locale=${encodeURIComponent(LOC)}`, {
     headers: { Accept: 'application/json' }, credentials: 'same-origin'
   })).json();
   const qs = r.questions || [];
@@ -55,5 +58,7 @@
   window.__CZ__ = { id, qs, ans, keys };
   console.log('已挂上自动点选：现在点「开始爬」就是 10/10');
 })();
+
+
 
 
